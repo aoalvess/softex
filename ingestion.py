@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from softex_funcs import tratar_colunas_numericas, tratar_coluna_dataparser, normalizar_coluna, limpar_texto, converter_para_horas_minutos, para_booleano, substituir_na_por_zero
+from softex_funcs import tratar_colunas_numericas, tratar_coluna_dataparser, normalizar_coluna, limpar_texto, converter_para_horas_minutos, para_booleano, substituir_na_por_zero, remover_caracteres
 from db import conecta_cria_db, envia_df_to_table
 
 
@@ -63,7 +63,8 @@ df = substituir_na_por_zero(df, colunas_tratar_na_zero)
 # Aplicar limpeza de emojis e caracteres não textuais nas colunas workflow e lane
 colunas_str = [
     'workflow', 
-    'lane'
+    'lane',
+    'column'
 ]
 
 for col in colunas_str:
@@ -73,6 +74,13 @@ for col in colunas_str:
 for col in colunas_str:
     if col in df.columns:
         df[col] = df[col].apply(limpar_texto)
+
+
+# Aplicar remoção de qtde de caracteres específicos de uma coluna
+colunas_remove_caract = [
+    'workspace'
+]        
+remover_caracteres(df, colunas_remove_caract, 2, 'inicio')
 
 # Lista das colunas de tempo originais para receberem tratamento
 colunas_tempo = ['TempoDecorrido', 'cycle_time', 'block_time', 'logged_time']

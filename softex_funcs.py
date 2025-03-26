@@ -1,9 +1,6 @@
 import pandas as pd
 import numpy as np
-import unicodedata, re, dateparser, psycopg2
-from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
-from sqlalchemy import create_engine, text
-from sqlalchemy.dialects.postgresql import VARCHAR, FLOAT, BOOLEAN, TIMESTAMP, DATE, TIME, INTEGER, TEXT
+import unicodedata, re, dateparser
 
 ###############################################################################################
 # DEFINIÇÃO DE FUNÇÕES PARA TRATAMENTO DE DADOS
@@ -20,12 +17,6 @@ def _parse_data_segura(valor):
     except Exception:
         return np.nan
 
-def tratar_coluna_data(df, colunas):
-    for col in colunas:
-        if col in df.columns:
-            df[col] = pd.to_datetime(df[col], errors='coerce')
-    return df
-
 def tratar_coluna_dataparser(df, colunas):
     for col in colunas:
         if col in df.columns:
@@ -35,18 +26,32 @@ def tratar_coluna_dataparser(df, colunas):
 
 # Função para normalizar nomes das colunas: minúsculo e sem acentos e sem espaços
 def normalizar_coluna(col):
-    col = col.strip().lower()  # remove espaços e coloca em minúsculo
-    col = unicodedata.normalize('NFKD', col).encode('ASCII', 'ignore').decode('utf-8')  # remove acentos
-    col = col.replace(' ', '_')  # opcional: troca espaços por underline
+    col = col.strip().lower()
+    col = unicodedata.normalize('NFKD', col).encode('ASCII', 'ignore').decode('utf-8')
+    col = col.replace(' ', '_')
     return col
 
 
 # Função para remover emojis e caracteres especiais, mantendo apenas letras, números, espaços e pontuação simples
 def limpar_texto(texto):
     if isinstance(texto, str):
-        # Remove qualquer caractere que não seja texto, número, espaço, vírgula, ponto, hífen ou underline
         return re.sub(r'[^\w\s,.\-]', '', texto)
-    return texto  # mantém NaN ou outros como estão
+    return texto 
+
+
+# Função para remover X caracteres de uma coluna, informando se é do inicio ou fim do campo
+def remover_caracteres(df, colunas, qtCaract, direcao='inicio'):
+    for coluna in colunas:
+        if coluna in df.columns:
+            if direcao == 'inicio':
+                df[coluna] = df[coluna].astype(str).str[qtCaract:]
+            elif direcao == 'fim':
+                df[coluna] = df[coluna].astype(str).str[:-qtCaract]
+            else:
+                raise ValueError("A direção deve ser 'inicio' ou 'fim'")
+        else:
+            raise ValueError(f"Coluna '{coluna}' não encontrada no DataFrame.")
+    return df
 
 
 # Função para converter decimal (vírgula ou ponto) em horas:minutos
@@ -55,11 +60,9 @@ def converter_para_horas_minutos(valor):
         if pd.isnull(valor):
             return np.nan
         
-        # Troca vírgula por ponto se necessário
         if isinstance(valor, str):
             valor = valor.strip().replace(',', '.')
 
-        # Converte para float
         horas_float = float(valor)
         if horas_float < 0:
             return np.nan

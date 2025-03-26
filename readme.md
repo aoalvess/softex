@@ -35,5 +35,11 @@ https://docs.google.com/spreadsheets/d/1sH2xZoKWklZWirYo1K9EEg167CQV55bbh-ycH3po
 8.	Remoção de todas as linhas em branco (todos os campos vazios) do dataframe.
 
 
-### Arquivo do Power BI disponibilizado na URL abaixo
+### Arquivo do Power BI
+
+Arquivo do Power BI está disponibilizado na pasta "pbix"
+
+### Relatório de Atividades
+
+O relatório de atividades encontra-se na pasta relatorio com o nome RTA#0001_AtividadeSoftex.pdf
 
