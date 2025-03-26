@@ -1,9 +1,8 @@
 import pandas as pd
 import numpy as np
-import unicodedata, re, dateparser, requests, psycopg2
-from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
-from sqlalchemy import create_engine, text
-from io import StringIO, BytesIO
+from softex_funcs import tratar_colunas_numericas, tratar_coluna_dataparser, normalizar_coluna, limpar_texto, converter_para_horas_minutos, para_booleano, substituir_na_por_zero
+from db import conecta_cria_db, envia_df_to_table
+
 
 # Carregar dados do Google Sheets
 # https://docs.google.com/spreadsheets/d/1sH2xZoKWklZWirYo1K9EEg167CQV55bbh-ycH3poZPQ/export?format=csv&id=1sH2xZoKWklZWirYo1K9EEg167CQV55bbh-ycH3poZPQ&gid=0
@@ -15,76 +14,7 @@ df = pd.read_csv(url)
 df = df.dropna(how='all')
 
 ###############################################################################################
-# DEFINIÇÃO DE FUNÇÕES PARA TRATAMENTO DE DADOS
-###############################################################################################
-
-# Função genérica para conversão de datas
-def tratar_coluna_data(df, colunas, formato_saida='%d/%m/%Y'):
-    for col in colunas:
-        if col in df.columns:
-            df[col] = pd.to_datetime(df[col], errors='coerce').dt.strftime(formato_saida)
-            df[col] = df[col].replace('NaT', np.nan)
-    return df
-
-def tratar_coluna_dataparser(df, colunas, formato_saida='%d/%m/%Y'):
-    for col in colunas:
-        if col in df.columns:
-            df[col] = df[col].apply(lambda x: _parse_data_segura(x, formato_saida))
-    return df
-
-def _parse_data_segura(valor, formato_saida):
-    if pd.isnull(valor):
-        return np.nan
-    try:
-        valor_str = str(valor)
-        dt = dateparser.parse(valor_str)
-        if dt:
-            return dt.strftime(formato_saida)
-    except Exception:
-        pass
-    return np.nan
-
-# Função para normalizar nomes das colunas: minúsculo e sem acentos e sem espaços
-def normalizar_coluna(col):
-    col = col.strip().lower()  # remove espaços e coloca em minúsculo
-    col = unicodedata.normalize('NFKD', col).encode('ASCII', 'ignore').decode('utf-8')  # remove acentos
-    col = col.replace(' ', '_')  # opcional: troca espaços por underline
-    return col
-
-
-# Função para remover emojis e caracteres especiais, mantendo apenas letras, números, espaços e pontuação simples
-def limpar_texto(texto):
-    if isinstance(texto, str):
-        # Remove qualquer caractere que não seja texto, número, espaço, vírgula, ponto, hífen ou underline
-        return re.sub(r'[^\w\s,.\-]', '', texto)
-    return texto  # mantém NaN ou outros como estão
-
-
-# Função para converter decimal (vírgula ou ponto) em horas:minutos
-def converter_para_horas_minutos(valor):
-    try:
-        if pd.isnull(valor):
-            return np.nan
-        
-        # Troca vírgula por ponto se necessário
-        if isinstance(valor, str):
-            valor = valor.strip().replace(',', '.')
-
-        # Converte para float
-        horas_float = float(valor)
-        if horas_float < 0:
-            return np.nan
-
-        horas = int(horas_float)
-        minutos = int(round((horas_float - horas) * 60))
-        
-        return f'{horas:02d}:{minutos:02d}'
-    
-    except:
-        return np.nan
-
-###############################################################################################
-# TRATAMENTO DOS DADOS UTILIZANDO AS FUNÇÕES CRIADAS
+# Realizando tratamento de dados
 ###############################################################################################
 
 # Colunas de data a serem tratadas
@@ -106,18 +36,36 @@ colunas_data_hora = [
     'last_moved'
 ]
 
-# Aplicar limpeza de emojis e caracteres não textuais nas colunas workflow e lane
-colunas_str = ['workflow', 'lane']
-
-# Substituir 'N/A' por 0 na coluna outcome_projection_value
-df['outcome_projection_value'] = df['outcome_projection_value'].replace('N/A', 0)
-df['outcome_projection_value'] = pd.to_numeric(df['outcome_projection_value'], errors='coerce').fillna(0)
-
 # Ajustar as colunas de data com os devidos formatos
-df = tratar_coluna_dataparser(df, colunas_data, formato_saida='%d/%m/%Y')
-df = tratar_coluna_dataparser(df, colunas_data_hora, formato_saida='%d/%m/%Y %H:%M')
+df = tratar_coluna_dataparser(df, colunas_data)
+df = tratar_coluna_dataparser(df, colunas_data_hora)
 
-# Converter apenas valores que são strings, remover outros (substituir por NaN)
+# Colunas numéricas para serem tratadas
+colunas_float = [
+    'outcome_projection_value',
+    'work_progress_value',
+    'work_progress_expected_value',
+    'block_time',
+    'logged_time',
+    'cycle_time',
+    'TempoDecorrido'
+]
+
+# Tratar as colunas numéricas
+df = tratar_colunas_numericas(df, colunas_float)
+
+# Colunas com N/A para converter em zero
+colunas_tratar_na_zero = [
+    'outcome_projection_value'
+]
+df = substituir_na_por_zero(df, colunas_tratar_na_zero)
+
+# Aplicar limpeza de emojis e caracteres não textuais nas colunas workflow e lane
+colunas_str = [
+    'workflow', 
+    'lane'
+]
+
 for col in colunas_str:
     if col in df.columns:
         df[col] = df[col].apply(lambda x: x if isinstance(x, str) else np.nan)
@@ -135,53 +83,19 @@ for col in colunas_tempo:
         nova_coluna = f'{col}_hhmm'
         df[nova_coluna] = df[col].apply(converter_para_horas_minutos)
 
+# Converter os dado do campo is_blocked para booleano
+df['is_blocked'] = df['is_blocked'].apply(para_booleano)
+
 # Normalizar nome de colunas do DataFrame
 df.columns = [normalizar_coluna(col) for col in df.columns]
 
+# print(df.columns)
+# print(df)
+
+
 ###############################################################################################
-# INSERINDO REGISTRO NO BANCO DE DADOS
+# Inserindo os registros no PostgreSQLS
 ###############################################################################################
 
-# Configurações de conexão
-usuario = 'root'
-senha = 'ectt2025'
-host = 'localhost'
-porta = '5437'
-banco = 'ecttdb'
-tabela = 'projetos_softex_csv'
-
-# Conecta ao PostgreSQL padrão (postgres) para criar banco
-try:
-    conn = psycopg2.connect(
-        dbname='postgres',
-        user=usuario,
-        password=senha,
-        host=host,
-        port=porta
-    )
-    conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
-    cursor = conn.cursor()
-
-    # Cria o banco se não existir
-    cursor.execute(f"SELECT 1 FROM pg_database WHERE datname = '{banco}'")
-    exists = cursor.fetchone()
-    if not exists:
-        cursor.execute(f'CREATE DATABASE {banco}')
-        print(f"Banco '{banco}' criado com sucesso.")
-    else:
-        print(f"Banco '{banco}' já existe.")
-
-    cursor.close()
-    conn.close()
-except Exception as e:
-    print(f"Erro ao criar banco: {e}")
-    exit()
-
-# Conecta ao banco criado e envia o dataframe para a tabela
-try:
-    url_conexao = f'postgresql+psycopg2://{usuario}:{senha}@{host}:{porta}/{banco}'
-    engine = create_engine(url_conexao)
-    df.to_sql(tabela, engine, if_exists='replace', index=False)
-    print(f"Tabela '{tabela}' criada no banco '{banco}' com sucesso!")
-except Exception as e:
-    print(f"Erro ao conectar ou enviar os dados: {e}")
+conecta_cria_db()
+envia_df_to_table(df)
